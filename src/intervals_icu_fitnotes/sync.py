@@ -69,14 +69,73 @@ def _format_weight(kg: float) -> str:
     return f"{kg:g}"
 
 
-def _format_set(s: Set) -> str:
-    """Format a single set as 'reps×weightkg [RPE x] [Status]'."""
-    parts = [f"{s.reps}×{_format_weight(s.weight_kg)}kg"]
+def _format_duration(seconds: float) -> str:
+    """Format seconds: '45s', '1m30s', '2m'."""
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    minutes, secs = divmod(total, 60)
+    if secs == 0:
+        return f"{minutes}m"
+    return f"{minutes}m{secs:02d}s"
+
+
+def _classify_exercise(sets: list[Set]) -> str:
+    """Return one of: 'isometric', 'bodyweight', 'weighted'."""
+    if all(s.time_s is not None and s.weight_kg == 0 for s in sets):
+        return "isometric"
+    if all(s.weight_kg == 0 for s in sets):
+        return "bodyweight"
+    return "weighted"
+
+
+def _format_one_set(s: Set, kind: str) -> str:
+    """Format a single set, without status/RPE suffix."""
+    if kind == "isometric":
+        return _format_duration(s.time_s or 0)
+    if kind == "bodyweight":
+        return f"{s.reps}"
+    # weighted: handle bodyweight sets in mixed exercise (e.g. pullups)
+    if s.weight_kg == 0:
+        return f"{s.reps}×BW"
+    return f"{s.reps}×{_format_weight(s.weight_kg)}kg"
+
+
+def _set_suffix(s: Set) -> str:
+    """RPE and non-Done status suffix, prefixed with space if present."""
+    parts = []
     if s.rpe is not None:
         parts.append(f"RPE{_format_weight(s.rpe)}")
     if s.status != "Done":
         parts.append(f"[{s.status}]")
-    return " ".join(parts)
+    return (" " + " ".join(parts)) if parts else ""
+
+
+def _all_identical(sets: list[Set], kind: str) -> bool:
+    """True if at least 3 sets share identical reps/weight/time/RPE/status."""
+    if len(sets) < 3:
+        return False
+    key = (
+        lambda s: (s.reps, s.weight_kg, s.time_s, s.rpe, s.status)
+    )
+    return len({key(s) for s in sets}) == 1
+
+
+def _format_exercise_sets(sets: list[Set]) -> str:
+    """Format all sets of one exercise as a single string."""
+    kind = _classify_exercise(sets)
+    if _all_identical(sets, kind):
+        first = sets[0]
+        base = _format_one_set(first, kind)
+        suffix = " reps" if kind == "bodyweight" else ""
+        return f"{len(sets)}×{base}{suffix}{_set_suffix(first)}"
+
+    pieces = [_format_one_set(s, kind) + _set_suffix(s) for s in sets]
+    sep = " · "
+    body = sep.join(pieces)
+    if kind == "bodyweight":
+        body += " reps"
+    return body
 
 
 def _format_tonnage(kg: float) -> str:
@@ -95,14 +154,21 @@ def format_description(sessions: tuple[Session, ...]) -> str:
         by_exercise[s.exercise].append(s)
 
     tonnage = sum(s.reps * s.weight_kg for s in all_sets if s.status == "Done")
+
+    # Join session names in order, deduplicating consecutive duplicates
+    session_names: list[str] = []
+    for sess in sessions:
+        if not session_names or session_names[-1] != sess.name:
+            session_names.append(sess.name)
+    title = " + ".join(session_names)
+
     header = (
-        f"{sessions[0].name} — {len(all_sets)} sets across "
+        f"{title} — {len(all_sets)} sets across "
         f"{len(by_exercise)} exercises, {_format_tonnage(tonnage)}"
     )
 
     lines = [header, ""]
     for exercise, exo_sets in by_exercise.items():
-        formatted = " · ".join(_format_set(s) for s in exo_sets)
-        lines.append(f"{exercise}: {formatted}")
+        lines.append(f"{exercise}: {_format_exercise_sets(exo_sets)}")
 
     return "\n".join(lines)

@@ -201,12 +201,25 @@ class TestFormatDescription:
         assert "80.0kg" not in desc
 
     def test_multiple_sessions_aggregated(self) -> None:
-        s1 = make_session(sets=(make_set("Bench", reps=5, weight=80),))
-        s2 = make_session(sets=(make_set("Squat", reps=5, weight=100),))
+        s1 = make_session(name="Push", sets=(make_set("Bench", reps=5, weight=80),))
+        s2 = make_session(name="Core", sets=(make_set("Squat", reps=5, weight=100),))
         desc = format_description((s1, s2))
         assert "Bench" in desc
         assert "Squat" in desc
         assert "2 sets across 2 exercises" in desc
+
+    def test_combined_title_when_multiple_session_names(self) -> None:
+        s1 = make_session(name="Séance A", sets=(make_set("Bench"),))
+        s2 = make_session(name="Core", sets=(make_set("Plank"),))
+        desc = format_description((s1, s2))
+        assert "Séance A + Core" in desc
+
+    def test_duplicate_session_names_deduplicated(self) -> None:
+        s1 = make_session(name="Push", sets=(make_set("Bench"),))
+        s2 = make_session(name="Push", sets=(make_set("Fly"),))
+        desc = format_description((s1, s2))
+        assert "Push + Push" not in desc
+        assert desc.split(" — ")[0] == "Push"
 
     def test_exercises_preserve_order(self) -> None:
         session = make_session(
@@ -217,8 +230,111 @@ class TestFormatDescription:
             )
         )
         desc = format_description((session,))
-        # Order of first occurrence
         squat_idx = desc.index("Squat")
         bench_idx = desc.index("Bench")
         deadlift_idx = desc.index("Deadlift")
         assert squat_idx < bench_idx < deadlift_idx
+
+
+class TestFormatBodyweight:
+    def test_bodyweight_sets_show_only_reps(self) -> None:
+        session = make_session(
+            sets=(
+                make_set("Russian twist", reps=20, weight=0),
+                make_set("Russian twist", reps=18, weight=0),
+            )
+        )
+        desc = format_description((session,))
+        assert "Russian twist: 20 · 18 reps" in desc
+        # The exercise line itself shouldn't have ×0kg
+        exercise_line = [l for l in desc.split("\n") if l.startswith("Russian twist")][0]
+        assert "0kg" not in exercise_line
+
+    def test_bodyweight_collapses_when_identical(self) -> None:
+        session = make_session(
+            sets=tuple(make_set("Pullup", reps=8, weight=0) for _ in range(3))
+        )
+        desc = format_description((session,))
+        assert "Pullup: 3×8 reps" in desc
+
+    def test_bodyweight_excluded_from_tonnage(self) -> None:
+        # 3 sets of 20 bodyweight reps = 0kg tonnage
+        session = make_session(
+            sets=tuple(make_set("Pullup", reps=20, weight=0) for _ in range(3))
+        )
+        desc = format_description((session,))
+        assert "0kg" in desc
+
+
+class TestFormatIsometric:
+    def test_isometric_shows_duration(self) -> None:
+        s1 = make_set("Plank", reps=0, weight=0)
+        s2 = make_set("Plank", reps=0, weight=0)
+        # Replace time_s using dataclass replace pattern
+        from dataclasses import replace
+
+        s1 = replace(s1, time_s=30.0)
+        s2 = replace(s2, time_s=45.0)
+        session = make_session(sets=(s1, s2))
+        desc = format_description((session,))
+        assert "Plank: 30s · 45s" in desc
+
+    def test_isometric_collapses_when_identical(self) -> None:
+        from dataclasses import replace
+
+        s = make_set("Plank", reps=0, weight=0)
+        s = replace(s, time_s=30.0)
+        session = make_session(sets=(s, s, s))
+        desc = format_description((session,))
+        assert "Plank: 3×30s" in desc
+
+    def test_duration_format_minutes(self) -> None:
+        from dataclasses import replace
+
+        s = make_set("Plank", reps=0, weight=0)
+        s = replace(s, time_s=90.0)
+        session = make_session(sets=(s,))
+        desc = format_description((session,))
+        assert "1m30s" in desc
+
+    def test_duration_format_whole_minutes(self) -> None:
+        from dataclasses import replace
+
+        s = make_set("Plank", reps=0, weight=0)
+        s = replace(s, time_s=120.0)
+        session = make_session(sets=(s,))
+        desc = format_description((session,))
+        assert "2m" in desc
+
+
+class TestMixedAndCollapse:
+    def test_weighted_exercise_with_some_bodyweight_sets(self) -> None:
+        # Pullups: first set with added weight, rest bodyweight
+        session = make_session(
+            sets=(
+                make_set("Pullup", reps=3, weight=5),
+                make_set("Pullup", reps=4, weight=0),
+                make_set("Pullup", reps=3, weight=0),
+            )
+        )
+        desc = format_description((session,))
+        assert "Pullup: 3×5kg · 4×BW · 3×BW" in desc
+
+    def test_collapse_requires_at_least_3_identical_sets(self) -> None:
+        # 2 identical sets should NOT collapse
+        session = make_session(
+            sets=(
+                make_set("Bench", reps=5, weight=80),
+                make_set("Bench", reps=5, weight=80),
+            )
+        )
+        desc = format_description((session,))
+        assert "Bench: 5×80kg · 5×80kg" in desc
+        assert "2×5×80kg" not in desc
+
+    def test_collapse_with_exactly_3_identical_sets(self) -> None:
+        session = make_session(
+            sets=tuple(make_set("Bench", reps=5, weight=80) for _ in range(3))
+        )
+        desc = format_description((session,))
+        assert "Bench: 3×5×80kg" in desc
