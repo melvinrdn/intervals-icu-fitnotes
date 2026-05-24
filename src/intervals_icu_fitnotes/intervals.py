@@ -69,7 +69,7 @@ class IntervalsClient:
     def update_activity_description(self, activity_id: str, description: str) -> None:
         """Overwrite the description of an existing activity."""
         r = self._session.put(
-            f"{API_BASE}/athlete/{self._athlete_id}/activities/{activity_id}",
+            f"{API_BASE}/activity/{activity_id}",
             json={"description": description},
             timeout=DEFAULT_TIMEOUT,
         )

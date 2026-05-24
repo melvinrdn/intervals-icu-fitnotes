@@ -167,7 +167,7 @@ class TestUpdateActivityDescription:
 
         url = mock_put.call_args.args[0]
         payload = mock_put.call_args.kwargs["json"]
-        assert url == f"{API_BASE}/athlete/i42/activities/act-123"
+        assert url == f"{API_BASE}/activity/act-123"
         assert payload == {"description": "new description"}
 
     def test_raises_on_http_error(self) -> None:
